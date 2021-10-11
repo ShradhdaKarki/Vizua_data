@@ -1,0 +1,541 @@
+---
+title: "Great American Beer Festival Analysis"
+author: "Thilini Vithanage, Shradhda Kaki, Sepand Gousheh"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    social: menu
+    source_code: embed
+---
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(scales)
+library(ggspatial)
+library(lubridate)
+library(sf)
+library(viridis)
+library(urbnmapr)
+library(animation)
+library(tidytext)
+library(proto)
+library(gsubfn)
+library(RSQLite)
+library(sqldf)
+library(gganimate)
+library(plotly)
+library(maps)
+library(tmap)
+library(leaflet)
+library(tidylo)
+library(dbplyr)
+library(ggmap)
+
+#loading the data 
+beer_awards <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-10-20/beer_awards.csv')
+
+#giving the right order to medals
+beer_awards$medal <- factor(beer_awards$medal, 
+                           c("Gold", "Silver", "Bronze"),
+                           levels = c("Gold", "Silver", "Bronze"),
+                           ordered = TRUE)
+#### Adding a new variable "new_cat" a more general category based on beer categories ####
+beer_awards$category <- tolower(beer_awards$category)
+
+gen_cat <- function(x){
+  ifelse(str_detect(x,'india pale ale'),'India pale ale',
+         ifelse(str_detect(x,'impe'),'Imperial',
+                ifelse(str_detect(x,'pale ale'),'Pale ale',
+                       ifelse(str_detect(x,'stout'),'Stouts',
+                              ifelse(str_detect(x,'lager'),'Lager',
+                                     ifelse(str_detect(x,'pils'),'Pilsner', 
+                                            ifelse((str_detect(x,'fruit beer'))|(str_detect(x,'ras')),'Fruit beer',
+                                                   ifelse(str_detect(x,'hefeweizen'),'Wheat beer',
+                                                          ifelse(str_detect(x,'witbier'),'Wheat beer',
+                                                                 ifelse(str_detect(x,'weizen'),'Wheat beer',
+                                                                        ifelse((!str_detect(x,'india pale ale') | !str_detect(x,'pale ale'))&
+                                                                                 (str_detect(x,'ale')),'Other ale',
+                                                                               ifelse(str_detect(x,'wheat'),'Wheat beer',
+                                                                                      ifelse(str_detect(x,'bock'),'Bock',
+                                                                                             ifelse(str_detect(x,'porte'),'Porter',
+                                                                                                    ifelse(str_detect(x,'bitter'),'Bitter','Other'
+                                                                                      )))))))))))))))
+}
+#adding the new category to dataframe
+beer_awards <- beer_awards %>% rowwise() %>% mutate(new_cat = gen_cat(category))
+
+#### Filtering for only Texas dataframe ####
+texas_beer <- beer_awards %>% filter(state == 'TX')
+
+#finding the top 8 breweries
+texas_brewery <- sqldf("select brewery,count(*) as n
+                       from beer_awards
+                       where state = 'TX'
+                       group by brewery
+                       order by n desc
+                       limit 8") 
+
+texas_brewery <- unique(texas_brewery$brewery)
+#
+texas_beer$brewery <- factor(texas_beer$brewery, levels = texas_brewery)
+#creating a states sf object for ploting ggplot objects from urbnmapr package
+states_sf <- get_urbn_map("states", sf = TRUE)
+```
+
+
+Texas Beer award analysis
+=======
+
+Column {.tabset}
+-----------------------------------------------------------------------
+
+### City medal comparison 
+
+```{r,fig.height= 10,fig.width= 8}
+#looking at what cities in Texas won the most medals
+plot1 <- texas_beer %>% 
+  group_by(medal,city) %>% 
+  count(medal) %>% 
+  ggplot(aes(x =reorder_within(city,n,medal),y=n,width=0.75)) + 
+  geom_bar(stat = 'identity',aes(fill=medal)) +
+  scale_fill_manual(values=c('Gold'="#FFCC33", 'Silver'="#999999",'Bronze'= "#CC6600")) +
+  labs(title = "Great American Beer Festival Medal Winner Analysis (1987-2020)", 
+       subtitle = "Texas Edition",
+       x ='Brewery city',
+       y = "Number of Medal Awards",
+       caption = "source = Great American Beer Festival \nGraph by @wjtorres\nEdited by group 3",
+       fill = 'Medal') +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 8),
+    plot.caption = element_text( size = 8),
+    plot.title = element_text(size = 14),
+    plot.subtitle = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 8),
+    axis.line.x = element_line(size = 0.5, linetype = "solid", colour = "black"),
+    axis.line.y = element_line(size = 0.5, linetype = "solid", colour = "black"),
+    plot.background = element_rect(fill = "#ffffff"),
+    axis.title.x = element_text(size =12,face='bold'),
+    axis.title.y = element_text(size =12,face='bold'),
+    strip.text.y = element_blank()
+    ) +
+  coord_flip()+
+  facet_grid(medal~.,scales = "free")+
+  scale_x_reordered()+
+  scale_y_continuous(breaks = seq(0,30,by = 5))
+plot1
+```
+
+### Brewery medal comparison 
+```{r,fig.height= 10,fig.width= 9}
+#brewery medal comparison
+plot2 <- texas_beer %>% filter(brewery %in% texas_brewery) %>% 
+  group_by(medal,brewery) %>% 
+  count(medal) %>%
+  ggplot(aes(x =reorder_within(brewery,n,medal),y=n,width=0.75)) + 
+  geom_bar(stat = 'identity',aes(fill=medal)) +
+  scale_fill_manual(values=c('Gold'="#FFCC33", 'Silver'="#999999",'Bronze'= "#CC6600")) +
+  labs(title = "Great American Beer Festival Medal Winner Analysis (1987-2020)", 
+       subtitle = "Texas Edition",
+       x ='Brewery name',
+       y = "Number of Medal Awards",
+       caption = "source = Great American Beer Festival",
+       fill = 'Medal') +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 8),
+    plot.caption = element_text( size = 8),
+    plot.title = element_text(size = 14),
+    plot.subtitle = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 8),
+    axis.line.x = element_line(size = 0.5, linetype = "solid", colour = "black"),
+    axis.line.y = element_line(size = 0.5, linetype = "solid", colour = "black"),
+    plot.background = element_rect(fill = "#ffffff"),
+    axis.title.x = element_text(size =12,face='bold'),
+    axis.title.y = element_text(size =12,face='bold'),
+    strip.text.y = element_blank()) +
+  coord_flip()+
+  facet_grid(medal~.,scales = "free")+
+  scale_x_reordered()+
+  scale_y_continuous(breaks = seq(0,30,by = 5))
+
+plot2
+```
+
+Column
+-----------------------------------------------------------------------
+
+### Brewery medals won by beer type
+
+```{r,fig.width=9}
+plot4<- texas_beer %>% filter(brewery %in% texas_brewery[1:4]) %>% group_by(brewery,medal,new_cat) %>% count(medal) %>%  
+  ggplot(aes(x=new_cat,y=n))+
+  coord_flip()+
+  facet_wrap(~brewery,scales = 'free')+
+  geom_col(aes(fill=medal),position = position_dodge2(preserve = "single"))+
+  scale_fill_manual(values=c('Gold'="#FFCC33", 'Silver'="#999999",'Bronze'= "#CC6600"))+
+  labs(title = "Texas top 4 breweries and awards based on beer type (1987-2020)",
+       y='Number of awards',x='Beer type',fill='Medals won',
+       caption = "source = Great American Beer Festival")+
+  theme_classic()+
+  theme(strip.text.x = element_text(size = 12,face = 'bold'),
+        plot.title = element_text(size = 14),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 8),
+        plot.caption = element_text( size = 8),
+        plot.subtitle = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 8),
+        axis.line.x = element_line(size = 0.5, linetype = "solid", colour = "black"),
+        axis.line.y = element_line(size = 0.5, linetype = "solid", colour = "black"),
+        plot.background = element_rect(fill = "#ffffff"),
+        axis.title.x = element_text(size =12,face='bold'),
+        axis.title.y = element_text(size =12,face='bold'))
+
+plot4
+```
+
+### Top two beer enteries from Texas
+
+```{r,fig.width=9}
+plot6.1<- beer_awards %>% filter(new_cat != 'Other' & state == 'TX' &
+                                   new_cat %in% c('Lager','Other ale'))%>% group_by(year,new_cat) %>% count(new_cat)%>% 
+  ggplot(aes(x=year,y=n))+geom_bar(stat = 'identity',aes(fill=new_cat))+facet_wrap(~new_cat)+
+  scale_x_continuous(breaks = seq(1980,2020,by = 5))+
+  labs(title = "Texas most awarded beer styles (1987-2020)",
+       y='Number of awards won',x=element_blank(),
+       caption = "source = Great American Beer Festival")+
+  theme_classic()+
+  theme(strip.text.x = element_text(size = 12,face = 'bold'),
+        plot.title = element_text(size = 14),
+        legend.position = "none",
+        panel.spacing = unit(1.5, "lines"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 8),
+        plot.caption = element_text( size = 8),
+        plot.subtitle = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 8),
+        axis.line.x = element_line(size = 0.5, linetype = "solid", colour = "black"),
+        axis.line.y = element_line(size = 0.5, linetype = "solid", colour = "black"),
+        plot.background = element_rect(fill = "#ffffff"),
+        axis.title.x = element_text(size =12,face='bold'),
+        axis.title.y = element_text(size =12,face='bold'))
+
+
+plot6.1
+  
+```
+
+
+US beer award analysis 
+===================
+
+```{r,include= FALSE}
+us_brewery <- sqldf("select brewery,count(*) as n
+                       from beer_awards
+                       group by brewery
+                       order by n desc
+                       limit 5") 
+
+us_brewery <- unique(us_brewery$brewery)
+#
+us_beer_select <- beer_awards %>% filter(brewery %in% us_brewery)
+
+us_beer_select$brewery <- factor(us_beer_select$brewery, levels = us_brewery)
+```
+
+```{r,echo=FALSE,include=FALSE}
+states_sf <- get_urbn_map("states", sf = TRUE)
+
+temp <- beer_awards %>% group_by(state,new_cat,medal) %>% count(medal)
+
+temp1 <- inner_join(states_sf,temp,by=c('state_abbv'='state'))
+
+df_plot <- temp1 %>% filter((new_cat %in% c('Lager','Stouts','Pale ale','Pilsner','Wheat beer','India pale ale')))
+rm(temp,temp1)
+
+temp <- beer_awards %>% group_by(state,new_cat) %>% count(new_cat)
+
+temp1 <- inner_join(states_sf,temp,by=c('state_abbv'='state'))
+
+df_plot1 <- temp1 %>% filter((new_cat %in% c('Lager','Stouts','Pale ale','Pilsner','Wheat beer','India pale ale')))
+rm(temp,temp1)
+```
+
+column {.tabset}
+------------
+### US top 5 brewries with most medals
+
+```{r,fig.height= 10,fig.width= 8}
+#brewery medal comparison
+plot12 <- us_beer_select %>% 
+  group_by(medal,brewery) %>% 
+  count(medal) %>%
+  ggplot(aes(x =reorder_within(brewery,n,medal),y=n,width=0.75)) + 
+  geom_bar(stat = 'identity',aes(fill=medal)) +
+  scale_fill_manual(values=c('Gold'="#FFCC33", 'Silver'="#999999",'Bronze'= "#CC6600")) +
+  labs(title = "Top 5 US by total medals won (1987-2020)", 
+       subtitle = "Texas Edition",
+       x ='Brewery name',
+       y = "Number of Medal Awards",
+       caption = "source = Great American Beer Festival",
+       fill = 'Medal') +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 8),
+    plot.caption = element_text( size = 8),
+    plot.title = element_text(size = 14),
+    plot.subtitle = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 8),
+    axis.line.x = element_line(size = 0.5, linetype = "solid", colour = "black"),
+    axis.line.y = element_line(size = 0.5, linetype = "solid", colour = "black"),
+    plot.background = element_rect(fill = "#ffffff"),
+    axis.title.x = element_text(size =12,face='bold'),
+    axis.title.y = element_text(size =12,face='bold'),
+    strip.text.y = element_blank()) +
+  coord_flip()+
+  facet_grid(medal~.,scales = "free")+
+  scale_x_reordered()+
+  scale_y_continuous(breaks = seq(0,30,by = 5))
+
+plot12
+```
+
+
+### Brewery medals won by beer type
+
+```{r,fig.height= 8,fig.width= 10}
+plot14<- us_beer_select %>% group_by(brewery,medal,new_cat) %>% count(medal) %>%  
+  ggplot(aes(x=new_cat,y=n))+
+  coord_flip()+
+  facet_wrap(~brewery,scales = 'free')+
+  geom_col(aes(fill=medal),position = position_dodge2(preserve = "single"))+
+  scale_fill_manual(values=c('Gold'="#FFCC33", 'Silver'="#999999",'Bronze'= "#CC6600"))+
+  labs(title = "US top 5 breweries and awards based on beer type (1987-2020)",
+       y='Number of awards',x='Beer type',fill='Medals won',
+       caption = "source = Great American Beer Festival")+
+  theme_classic()+
+  theme(strip.text.x = element_text(size = 12,face = 'bold'),
+        plot.title = element_text(size = 14),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 8),
+        plot.caption = element_text( size = 8),
+        plot.subtitle = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 8),
+        axis.line.x = element_line(size = 0.5, linetype = "solid", colour = "black"),
+        axis.line.y = element_line(size = 0.5, linetype = "solid", colour = "black"),
+        plot.background = element_rect(fill = "#ffffff"),
+        axis.title.x = element_text(size =12,face='bold'),
+        axis.title.y = element_text(size =12,face='bold'))
+
+plot14
+```
+
+
+### beer types
+
+```{r,fig.height= 10,fig.width= 10}
+plot5<- beer_awards %>% filter(new_cat != 'Other')%>% group_by(year,new_cat) %>% count(new_cat)%>% 
+  ggplot(aes(x=year,y=n))+geom_bar(stat = 'identity',aes(fill=new_cat))+facet_wrap(~new_cat,scale='free',ncol = 3)+
+  scale_x_continuous(breaks = seq(1980,2020,by = 5))+
+  labs(title = "General beer styles based on total number of medals won (1987-2020)",
+       y='Number of awards',x=element_blank(),
+       caption = "source = Great American Beer Festival")+
+  theme_classic()+
+  theme(strip.text.x = element_text(size = 12,face = 'bold'),
+        plot.title = element_text(size = 14),
+        legend.position = "none")
+
+plot5
+```
+
+### Interactive US map
+
+```{r}
+### load map from library
+temp <- beer_awards
+temp$STATE<-toupper(temp$state)
+temp$state<-NULL
+
+### counting most occurring beers in the state using tidylo library
+new_beerlabel <- sqldf("select state,new_cat,count(*)as n
+           from beer_awards
+           where new_cat != 'Other'
+           group by state,new_cat")
+
+
+new_beerlabel %>% group_by(state) %>%
+  mutate(my_ranks = order(order(n, decreasing=TRUE))) -> new_beerlabel
+ 
+new_beerlabel <- new_beerlabel %>% filter(my_ranks == 1) %>% select(state,new_cat)
+
+colnames(new_beerlabel) <- c('STATE','beer')
+ 
+ # count of total medals state wise
+total_medal <- sqldf("select state as STATE,count(*) as n
+                     from beer_awards
+                     group by state")
+ 
+ 
+ # adding map elements
+ Us_map<-get_urbn_map("states",sf=TRUE)
+
+ new_map<-inner_join(Us_map,new_beerlabel,by=c('state_abbv'='STATE'))
+ new_map<-inner_join(new_map,total_medal,by=c('state_abbv'='STATE'))
+ 
+
+ addresses<-unique(new_map$address)
+ new_map$geometry<-NULL
+
+
+states <- geojsonio::geojson_read("gz_2010_us_040_00_500k.json", what = "sp")
+colnames(new_map)[3]="NAME"
+
+s<-merge(x=states,y=new_map,by='NAME',all.x=TRUE)
+
+
+
+
+#Create a final spatialPolygonsDataframe to create map
+
+require(sp)
+final_table<-merge(states,s,by="NAME")
+
+
+
+ ###making map interactive using leaflet
+ 
+ 
+ 
+ bins<-c(0,10,20,50,100,500,1000)    #Create a color palette with Bins
+ pal<-colorBin("BuPu" ,domain=final_table,bins =bins)
+ 
+ 
+ labels <- paste(                   #Create a label with state name and their number one famous beer
+   final_table@data$NAME,"<br/>", 
+   final_table@data$beer 
+ ) %>%
+   lapply(htmltools::HTML)
+ 
+ 
+ 
+ 
+ m<-leaflet(final_table)%>%
+   setView(-96, 37.8, 4)%>%
+        addProviderTiles(providers$Stamen.Toner)%>%
+     addPolygons( data=final_table,
+                  weight=1,
+                  color="#660000",
+                  smoothFactor=1,
+                  dashArray=3,
+                  fillOpacity=0.7)
+
+
+
+m <- m %>% addPolygons(
+    fillColor = ~pal(n),
+    weight = 2,
+    opacity = 1,
+    color = "black",
+    dashArray = "3",
+    fillOpacity = 0.7,
+    highlight = highlightOptions(
+        weight = 5,
+        color = "#660000",
+        dashArray = "",
+        fillOpacity = 0.7,
+        bringToFront = TRUE),
+    label = labels,
+    labelOptions = labelOptions(
+        style = list("font-weight" = "normal", padding = "3px 8px"),
+        textsize = "15px",
+        direction = "auto"))
+
+m %>% addLegend(pal = pal, values = ~n, opacity = 0.7, title = "Total medal and their famous beer",
+                position = "bottomright")
+```
+
+column
+--------------------
+
+### beer types
+```{r,fig.width= 9}
+beer_type <- sqldf("select new_cat,count(*) as n
+                       from beer_awards
+                       where new_cat != 'Other'
+                       group by new_cat
+                       order by n desc
+                       limit 5") 
+
+beer_type <- unique(beer_type$new_cat)
+
+
+plot3 <-  beer_awards %>% filter(new_cat %in% beer_type) %>% 
+  group_by(new_cat) %>% 
+  count(new_cat) %>%  
+  ggplot(aes(x =reorder(new_cat,n),y=n,width=0.75)) + 
+  geom_bar(stat = 'identity',fill='#42c20c') +
+  labs(title = "Most awarded beer types (1987-2020)", 
+       x ='Beer Type',
+       y = "Number of Medal Awards",
+       caption = "source = Great American Beer Festival",
+       fill = 'Medal') +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 8),
+    plot.caption = element_text( size = 8),
+    plot.title = element_text(size = 14),
+    plot.subtitle = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 8),
+    axis.line.x = element_line(size = 0.5, linetype = "solid", colour = "black"),
+    axis.line.y = element_line(size = 0.5, linetype = "solid", colour = "black"),
+    plot.background = element_rect(fill = "#ffffff"),
+    axis.title.x = element_text(size =12,face='bold'),
+    axis.title.y = element_text(size =12,face='bold')
+    #strip.text.y = element_blank(), #I left this in because of color blind people
+  ) +
+  coord_flip()
+plot3
+```
+
+### map
+
+```{r,fig.height= 8,fig.width= 8, fig.fullwidth=TRUE}
+
+plot10<- ggplot()+ theme_bw()+
+  geom_sf(data = states_sf,fill='#ffffff',size = 0.05)+
+  geom_sf(data = df_plot1,aes(fill=n))+
+  geom_sf_text(data = df_plot1,aes(label=state_abbv),size=2)+
+  scale_fill_gradient(low = "#e5ffcc", high = "#3d700b", na.value = NA)+
+  facet_wrap(~new_cat,ncol = 2)+ coord_sf(datum = NA)+
+  labs(title = 'Total number of Medals won by breweries in each state (1987-2020)\nbased on beer types',
+       x=element_blank(),y=element_blank(),fill='Medals won\nscale')+
+  theme(strip.text.x = element_text(size = 12,face = 'bold'))
+plot10
+```
+
+
